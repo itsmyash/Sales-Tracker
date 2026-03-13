@@ -190,7 +190,9 @@ input[type=range]{width:100%;accent-color:#f59e0b;cursor:pointer;}
     <button class="nav-tab" onclick="showPage('report')">📄 Report</button>
   </div>
   <div class="nav-right">
+    <span id="save-indicator" style="font-size:11px;color:#2d4060;padding:0 8px;">💾 Auto-saving</span>
     <button class="btn-export" onclick="exportCSV()">⬇ CSV</button>
+    <button class="btn-export" style="color:#ef4444;border-color:#ef444444;" onclick="clearAllData()">🗑 Clear Data</button>
     <button class="btn-print" onclick="showPage('report');setTimeout(printReport,300)">🖨 Print Report</button>
   </div>
 </nav>
@@ -408,17 +410,16 @@ input[type=range]{width:100%;accent-color:#f59e0b;cursor:pointer;}
 </main>
 <div id="toast">✅ Done!</div>
 
-<script>
+<script type="module">
 // ── DATA ─────────────────────────────────────────────────────────────────────
-let deals = [
+const SAMPLE_DEALS = [
   {id:1,client:"Sarah Johnson",phone:"215-555-0101",email:"sarah@email.com",type:"Listing",value:450000,commission:11250,net:7875,status:"Closed",date:"2026-01-15",followup:"",notes:"Referred by Mike"},
   {id:2,client:"Mike & Tanya Rivera",phone:"215-555-0202",email:"tanya@email.com",type:"Purchase",value:320000,commission:8000,net:5600,status:"Under Contract",date:"2026-02-03",followup:"2026-03-15",notes:"Waiting on inspection"},
   {id:3,client:"David Chen",phone:"215-555-0303",email:"dchen@email.com",type:"Listing",value:580000,commission:14500,net:10150,status:"Active",date:"2026-02-20",followup:"2026-03-13",notes:"Luxury market"},
   {id:4,client:"Priya Patel",phone:"215-555-0404",email:"priya@email.com",type:"Referral",value:270000,commission:6750,net:4725,status:"Lead",date:"2026-03-01",followup:"2026-03-14",notes:""},
   {id:5,client:"James Okafor",phone:"215-555-0505",email:"james@email.com",type:"Listing",value:390000,commission:9750,net:6825,status:"Closed",date:"2026-02-10",followup:"",notes:""},
 ];
-
-let tasks = {
+const SAMPLE_TASKS = {
   1:[{text:"Send closing gift",done:true},{text:"Request Google review",done:false}],
   2:[{text:"Confirm inspection date",done:false},{text:"Review contract",done:true},{text:"Contact title company",done:false}],
   3:[{text:"Schedule open house",done:false},{text:"Upload photos",done:false}],
@@ -426,7 +427,94 @@ let tasks = {
   5:[{text:"File paperwork",done:true},{text:"Send thank you note",done:true}],
 };
 
-let nextId = 6;
+// ── FIREBASE SETUP ────────────────────────────────────────────────────────────
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCjvr_9Fa72S3FeHXIhRl79KrqV2UOD-mc",
+  authDomain: "sales-tracker-442ac.firebaseapp.com",
+  projectId: "sales-tracker-442ac",
+  storageBucket: "sales-tracker-442ac.firebasestorage.app",
+  messagingSenderId: "1024723774235",
+  appId: "1:1024723774235:web:cb2e41e7578f0681b7c1be"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+const DATA_DOC = doc(db, "tracker", "mydata");
+
+let deals = [];
+let tasks = {};
+let nextId = 1;
+let _firebaseReady = false;
+
+async function saveData(){
+  try {
+    const settings = {
+      goalIncome: document.getElementById("sl-income")?.value,
+      avgHome: document.getElementById("sl-home")?.value,
+      commPct: document.getElementById("sl-comm")?.value,
+      brokerSplit: document.getElementById("sl-split")?.value,
+    };
+    await setDoc(DATA_DOC, { deals, tasks, nextId, settings });
+    const ind = document.getElementById("save-indicator");
+    if(ind){ ind.textContent="✅ Synced"; ind.style.color="#10b981"; setTimeout(()=>{ ind.textContent="🔥 Live Sync On"; ind.style.color="#2d4060"; }, 1500); }
+  } catch(e){ console.error("Save error:", e); }
+}
+
+async function clearAllData(){
+  if(!confirm("Are you sure you want to delete ALL your deals and data? This cannot be undone.")) return;
+  deals=[]; tasks={}; nextId=1;
+  await saveData();
+  toast("🗑 All data cleared");
+  renderAll();
+}
+
+async function initFirebase(){
+  const ind = document.getElementById("save-indicator");
+  if(ind){ ind.textContent="🔄 Connecting..."; ind.style.color="#f59e0b"; }
+  try {
+    const snap = await getDoc(DATA_DOC);
+    if(snap.exists()){
+      const d = snap.data();
+      deals = d.deals || SAMPLE_DEALS;
+      tasks = d.tasks || SAMPLE_TASKS;
+      nextId = d.nextId || 6;
+      if(d.settings){
+        if(d.settings.goalIncome) document.getElementById("sl-income").value = d.settings.goalIncome;
+        if(d.settings.avgHome) document.getElementById("sl-home").value = d.settings.avgHome;
+        if(d.settings.commPct) document.getElementById("sl-comm").value = d.settings.commPct;
+        if(d.settings.brokerSplit) document.getElementById("sl-split").value = d.settings.brokerSplit;
+      }
+    } else {
+      deals = SAMPLE_DEALS;
+      tasks = SAMPLE_TASKS;
+      nextId = 6;
+    }
+    _firebaseReady = true;
+    if(ind){ ind.textContent="🔥 Live Sync On"; ind.style.color="#10b981"; }
+
+    // Listen for real-time changes from other devices
+    onSnapshot(DATA_DOC, (snap) => {
+      if(!snap.exists()) return;
+      const d = snap.data();
+      deals = d.deals || [];
+      tasks = d.tasks || {};
+      nextId = d.nextId || 1;
+      renderAll();
+      const ind2 = document.getElementById("save-indicator");
+      if(ind2){ ind2.textContent="🔄 Updated!"; ind2.style.color="#3b82f6"; setTimeout(()=>{ ind2.textContent="🔥 Live Sync On"; ind2.style.color="#10b981"; }, 1500); }
+    });
+
+    renderAll();
+  } catch(e){
+    console.error("Firebase error:", e);
+    if(ind){ ind.textContent="⚠️ Offline"; ind.style.color="#ef4444"; }
+    deals = SAMPLE_DEALS; tasks = SAMPLE_TASKS; nextId = 6;
+    renderAll();
+  }
+}
 const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const SC={Lead:"#f59e0b",Active:"#3b82f6","Under Contract":"#8b5cf6",Closed:"#10b981",Lost:"#ef4444"};
 const ICONS={Listing:"🏡",Purchase:"🛒",Referral:"🤝",Other:"📁"};
@@ -612,7 +700,7 @@ function renderReminders(){
 function toggleTask(dealId,taskIdx){
   if(!tasks[dealId]) tasks[dealId]=[];
   tasks[dealId][taskIdx].done=!tasks[dealId][taskIdx].done;
-  renderReminders();
+  saveData();renderReminders();
 }
 
 function addTask(dealId){
@@ -622,7 +710,7 @@ function addTask(dealId){
   if(!tasks[dealId]) tasks[dealId]=[];
   tasks[dealId].push({text,done:false});
   inp.value="";
-  renderReminders();
+  saveData();renderReminders();
 }
 
 // ── CONTACTS ─────────────────────────────────────────────────────────────────
@@ -835,7 +923,7 @@ function saveDeal(){
   };
   if(editId){deals=deals.map(d=>d.id===+editId?{...d,...deal}:d);toast("✅ Deal updated!");}
   else{deals.push({...deal,id:nextId++});tasks[nextId-1]=[];toast("✅ Deal added!");}
-  toggleForm();renderAll();
+  saveData();toggleForm();renderAll();
 }
 
 function editDeal(id){
@@ -855,8 +943,8 @@ function editDeal(id){
   updatePreview();
 }
 
-function deleteDeal(id){if(!confirm("Delete this deal?"))return;deals=deals.filter(d=>d.id!==id);toast("🗑 Deal deleted");renderAll();}
-function changeStatus(id,status){deals=deals.map(d=>d.id===id?{...d,status}:d);renderAll();}
+function deleteDeal(id){if(!confirm("Delete this deal?"))return;deals=deals.filter(d=>d.id!==id);saveData();toast("🗑 Deal deleted");renderAll();}
+function changeStatus(id,status){deals=deals.map(d=>d.id===id?{...d,status}:d);saveData();renderAll();}
 
 // ── EXPORT CSV ───────────────────────────────────────────────────────────────
 function exportCSV(){
@@ -870,7 +958,10 @@ function exportCSV(){
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
-renderAll();
+["sl-income","sl-home","sl-comm","sl-split"].forEach(id=>{
+  document.getElementById(id)?.addEventListener("change", saveData);
+});
+initFirebase();
 </script>
 </body>
 </html>
