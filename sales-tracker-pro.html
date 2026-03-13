@@ -169,6 +169,8 @@ input[type=range]{width:100%;accent-color:#f59e0b;cursor:pointer;}
   #print-area{display:block!important;}
 }
 </style>
+<script src="https://unpkg.com/firebase@10.8.0/compat/app.js"></script>
+<script src="https://unpkg.com/firebase@10.8.0/compat/firestore.js"></script>
 </head>
 <body>
 
@@ -325,6 +327,11 @@ input[type=range]{width:100%;accent-color:#f59e0b;cursor:pointer;}
         <input type="range" id="sp-eo" min="0" max="2" step="0.1" value="0.5" oninput="calcSplit()"/>
         <div class="slider-minmax"><span>0%</span><span>2%</span></div>
       </div>
+      <div class="slider-row">
+        <div class="slider-label"><span>Referral Fee (% of gross commission)</span><span id="sp-referral-val">0%</span></div>
+        <input type="range" id="sp-referral" min="0" max="40" step="5" value="0" oninput="calcSplit()"/>
+        <div class="slider-minmax"><span>0%</span><span>40%</span></div>
+      </div>
     </div>
     <div>
       <div class="card card-gold">
@@ -410,7 +417,7 @@ input[type=range]{width:100%;accent-color:#f59e0b;cursor:pointer;}
 </main>
 <div id="toast">✅ Done!</div>
 
-<script type="module">
+<script>
 // ── DATA ─────────────────────────────────────────────────────────────────────
 const SAMPLE_DEALS = [
   {id:1,client:"Sarah Johnson",phone:"215-555-0101",email:"sarah@email.com",type:"Listing",value:450000,commission:11250,net:7875,status:"Closed",date:"2026-01-15",followup:"",notes:"Referred by Mike"},
@@ -428,9 +435,6 @@ const SAMPLE_TASKS = {
 };
 
 // ── FIREBASE SETUP ────────────────────────────────────────────────────────────
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
 const firebaseConfig = {
   apiKey: "AIzaSyCjvr_9Fa72S3FeHXIhRl79KrqV2UOD-mc",
   authDomain: "sales-tracker-442ac.firebaseapp.com",
@@ -440,16 +444,34 @@ const firebaseConfig = {
   appId: "1:1024723774235:web:cb2e41e7578f0681b7c1be"
 };
 
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp);
-const DATA_DOC = doc(db, "tracker", "mydata");
+let db = null;
+let DATA_DOC = null;
 
-let deals = [];
-let tasks = {};
-let nextId = 1;
-let _firebaseReady = false;
+function initFirebaseIfReady(){
+  if(typeof firebase === "undefined"){
+    console.warn("Firebase not loaded, running offline.");
+    const ind = document.getElementById("save-indicator");
+    if(ind){ ind.textContent="💾 Offline Mode"; ind.style.color="#f59e0b"; }
+    renderAll();
+    return;
+  }
+  try {
+    if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    DATA_DOC = db.collection("tracker").doc("mydata");
+    initFirebase();
+  } catch(e){
+    console.error("Firebase init error:", e);
+    renderAll();
+  }
+}
 
 async function saveData(){
+  if(!DATA_DOC){
+    // offline fallback - save to localStorage
+    try { localStorage.setItem("st_backup", JSON.stringify({deals,tasks,nextId})); } catch(e){}
+    return;
+  }
   try {
     const settings = {
       goalIncome: document.getElementById("sl-income")?.value,
@@ -457,9 +479,9 @@ async function saveData(){
       commPct: document.getElementById("sl-comm")?.value,
       brokerSplit: document.getElementById("sl-split")?.value,
     };
-    await setDoc(DATA_DOC, { deals, tasks, nextId, settings });
+    await DATA_DOC.set({ deals, tasks, nextId, settings });
     const ind = document.getElementById("save-indicator");
-    if(ind){ ind.textContent="✅ Synced"; ind.style.color="#10b981"; setTimeout(()=>{ ind.textContent="🔥 Live Sync On"; ind.style.color="#2d4060"; }, 1500); }
+    if(ind){ ind.textContent="✅ Synced"; ind.style.color="#10b981"; setTimeout(()=>{ ind.textContent="🔥 Live Sync On"; ind.style.color="#10b981"; }, 1500); }
   } catch(e){ console.error("Save error:", e); }
 }
 
@@ -475,8 +497,82 @@ async function initFirebase(){
   const ind = document.getElementById("save-indicator");
   if(ind){ ind.textContent="🔄 Connecting..."; ind.style.color="#f59e0b"; }
   try {
-    const snap = await getDoc(DATA_DOC);
-    if(snap.exists()){
+    const snap = await DATA_DOC.get();
+    if(snap.exists){
+      const d = snap.data();
+      deals = d.deals || SAMPLE_DEALS;
+      tasks = d.tasks || SAMPLE_TASKS;
+      nextId = d.nextId || 6;
+      if(d.settings){
+        if(d.settings.goalIncome) document.getElementById("sl-income").value = d.settings.goalIncome;
+        if(d.settings.avgHome) document.getElementById("sl-home").value = d.settings.avgHome;
+        if(d.settings.commPct) document.getElementById("sl-comm").value = d.settings.commPct;
+        if(d.settings.brokerSplit) document.getElementById("sl-split").value = d.settings.brokerSplit;
+      }
+    }
+    if(ind){ ind.textContent="🔥 Live Sync On"; ind.style.color="#10b981"; }
+    DATA_DOC.onSnapshot((snap) => {
+      if(!snap.exists) return;
+      const d = snap.data();
+      deals = d.deals || [];
+      tasks = d.tasks || {};
+      nextId = d.nextId || 1;
+      renderAll();
+      const ind2 = document.getElementById("save-indicator");
+      if(ind2){ ind2.textContent="🔄 Updated!"; ind2.style.color="#3b82f6"; setTimeout(()=>{ ind2.textContent="🔥 Live Sync On"; ind2.style.color="#10b981"; }, 1500); }
+    });
+    renderAll();
+  } catch(e){
+    console.error("Firebase error:", e);
+    if(ind){ ind.textContent="⚠️ Offline"; ind.style.color="#ef4444"; }
+    renderAll();
+  }
+}
+
+let deals = [
+  {id:1,client:"Sarah Johnson",phone:"215-555-0101",email:"sarah@email.com",type:"Listing",value:450000,commission:11250,net:7875,status:"Closed",date:"2026-01-15",followup:"",notes:"Referred by Mike"},
+  {id:2,client:"Mike & Tanya Rivera",phone:"215-555-0202",email:"tanya@email.com",type:"Purchase",value:320000,commission:8000,net:5600,status:"Under Contract",date:"2026-02-03",followup:"2026-03-15",notes:"Waiting on inspection"},
+  {id:3,client:"David Chen",phone:"215-555-0303",email:"dchen@email.com",type:"Listing",value:580000,commission:14500,net:10150,status:"Active",date:"2026-02-20",followup:"2026-03-13",notes:"Luxury market"},
+  {id:4,client:"Priya Patel",phone:"215-555-0404",email:"priya@email.com",type:"Referral",value:270000,commission:6750,net:4725,status:"Lead",date:"2026-03-01",followup:"2026-03-14",notes:""},
+  {id:5,client:"James Okafor",phone:"215-555-0505",email:"james@email.com",type:"Listing",value:390000,commission:9750,net:6825,status:"Closed",date:"2026-02-10",followup:"",notes:""},
+];
+let tasks = {
+  1:[{text:"Send closing gift",done:true},{text:"Request Google review",done:false}],
+  2:[{text:"Confirm inspection date",done:false},{text:"Review contract",done:true},{text:"Contact title company",done:false}],
+  3:[{text:"Schedule open house",done:false},{text:"Upload photos",done:false}],
+  4:[{text:"Send intro email",done:false},{text:"Schedule showing",done:false}],
+  5:[{text:"File paperwork",done:true},{text:"Send thank you note",done:true}],
+};
+let nextId = 6;
+
+async function saveData(){
+  try {
+    const settings = {
+      goalIncome: document.getElementById("sl-income")?.value,
+      avgHome: document.getElementById("sl-home")?.value,
+      commPct: document.getElementById("sl-comm")?.value,
+      brokerSplit: document.getElementById("sl-split")?.value,
+    };
+    await DATA_DOC.set({ deals, tasks, nextId, settings });
+    const ind = document.getElementById("save-indicator");
+    if(ind){ ind.textContent="✅ Synced"; ind.style.color="#10b981"; setTimeout(()=>{ ind.textContent="🔥 Live Sync On"; ind.style.color="#10b981"; }, 1500); }
+  } catch(e){ console.error("Save error:", e); }
+}
+
+async function clearAllData(){
+  if(!confirm("Are you sure you want to delete ALL your deals and data? This cannot be undone.")) return;
+  deals=[]; tasks={}; nextId=1;
+  await saveData();
+  toast("🗑 All data cleared");
+  renderAll();
+}
+
+async function initFirebase(){
+  const ind = document.getElementById("save-indicator");
+  if(ind){ ind.textContent="🔄 Connecting..."; ind.style.color="#f59e0b"; }
+  try {
+    const snap = await DATA_DOC.get();
+    if(snap.exists){
       const d = snap.data();
       deals = d.deals || SAMPLE_DEALS;
       tasks = d.tasks || SAMPLE_TASKS;
@@ -492,12 +588,11 @@ async function initFirebase(){
       tasks = SAMPLE_TASKS;
       nextId = 6;
     }
-    _firebaseReady = true;
     if(ind){ ind.textContent="🔥 Live Sync On"; ind.style.color="#10b981"; }
 
     // Listen for real-time changes from other devices
-    onSnapshot(DATA_DOC, (snap) => {
-      if(!snap.exists()) return;
+    DATA_DOC.onSnapshot((snap) => {
+      if(!snap.exists) return;
       const d = snap.data();
       deals = d.deals || [];
       tasks = d.tasks || {};
@@ -522,16 +617,16 @@ const ICONS={Listing:"🏡",Purchase:"🛒",Referral:"🤝",Other:"📁"};
 // ── HELPERS ──────────────────────────────────────────────────────────────────
 const fmtFull=n=>isNaN(n)||n==null?"$0":"$"+Number(n).toLocaleString();
 const fmt=n=>isNaN(n)?"$0":n>=1e6?`$${(n/1e6).toFixed(1)}M`:n>=1000?`$${(n/1000).toFixed(0)}K`:`$${n}`;
-const goalIncome=()=>+document.getElementById("sl-income").value;
-const avgHome=()=>+document.getElementById("sl-home").value;
-const commPct=()=>+document.getElementById("sl-comm").value;
-const brokerSplit=()=>+document.getElementById("sl-split").value;
-const earned=()=>deals.filter(d=>d.status==="Closed").reduce((s,d)=>s+(d.net||d.commission),0);
-const grossEarned=()=>deals.filter(d=>d.status==="Closed").reduce((s,d)=>s+d.commission,0);
-const closedDeals=()=>deals.filter(d=>d.status==="Closed");
-const progress=()=>Math.min(100,Math.round((earned()/goalIncome())*100));
-const today=()=>new Date().toISOString().split("T")[0];
-const calcNet=(gross,split)=>Math.round(gross*(1-(split/100)));
+function goalIncome(){ return +document.getElementById("sl-income").value; }
+function avgHome(){ return +document.getElementById("sl-home").value; }
+function commPct(){ return +document.getElementById("sl-comm").value; }
+function brokerSplit(){ return +document.getElementById("sl-split").value; }
+function earned(){ return deals.filter(d=>d.status==="Closed").reduce((s,d)=>s+(d.net||d.commission),0); }
+function grossEarned(){ return deals.filter(d=>d.status==="Closed").reduce((s,d)=>s+d.commission,0); }
+function closedDeals(){ return deals.filter(d=>d.status==="Closed"); }
+function progress(){ return Math.min(100,Math.round((earned()/goalIncome())*100)); }
+function calcNet(gross,split){ return Math.round(gross*(1-(split/100))); }
+function today(){ return new Date().toISOString().split("T")[0]; }
 
 function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.display="block";setTimeout(()=>t.style.display="none",2200);}
 
@@ -745,22 +840,28 @@ function calcSplit(){
   const brokerPct=+document.getElementById("sp-broker").value;
   const fee=+document.getElementById("sp-fee").value;
   const eoPct=+document.getElementById("sp-eo").value;
+  const referralPct=+document.getElementById("sp-referral").value;
 
   document.getElementById("sp-price-val").textContent=fmtFull(price);
   document.getElementById("sp-rate-val").textContent=rate+"%";
   document.getElementById("sp-broker-val").textContent=brokerPct+"%";
   document.getElementById("sp-fee-val").textContent=fmtFull(fee);
   document.getElementById("sp-eo-val").textContent=eoPct+"%";
+  document.getElementById("sp-referral-val").textContent=referralPct+"%";
 
   const gross=Math.round(price*rate/100);
-  const brokerAmt=Math.round(gross*brokerPct/100);
-  const agentGross=gross-brokerAmt;
+  const referralAmt=Math.round(gross*referralPct/100);
+  const afterReferral=gross-referralAmt;
+  const brokerAmt=Math.round(afterReferral*brokerPct/100);
+  const agentGross=afterReferral-brokerAmt;
   const eoAmt=Math.round(agentGross*eoPct/100);
   const netTakeHome=agentGross-eoAmt-fee;
 
   document.getElementById("split-result").innerHTML=`
     <div class="split-row"><span class="split-label">Sale Price</span><span class="split-val" style="color:#e2e8f0;">${fmtFull(price)}</span></div>
     <div class="split-row"><span class="split-label">Total Commission (${rate}%)</span><span class="split-val" style="color:#3b82f6;">${fmtFull(gross)}</span></div>
+    ${referralPct>0?`<div class="split-row"><span class="split-label">Referral Fee (${referralPct}%)</span><span class="split-val" style="color:#ef4444;">- ${fmtFull(referralAmt)}</span></div>`:""}
+    <div class="split-row"><span class="split-label">After Referral</span><span class="split-val" style="color:#e2e8f0;">${fmtFull(afterReferral)}</span></div>
     <div class="split-row"><span class="split-label">Broker Keeps (${brokerPct}%)</span><span class="split-val" style="color:#ef4444;">- ${fmtFull(brokerAmt)}</span></div>
     <div class="split-row"><span class="split-label">Your Agent Gross</span><span class="split-val" style="color:#f59e0b;">${fmtFull(agentGross)}</span></div>
     <div class="split-row"><span class="split-label">E&O Insurance (${eoPct}%)</span><span class="split-val" style="color:#ef4444;">- ${fmtFull(eoAmt)}</span></div>
@@ -961,9 +1062,11 @@ function exportCSV(){
 ["sl-income","sl-home","sl-comm","sl-split"].forEach(id=>{
   document.getElementById(id)?.addEventListener("change", saveData);
 });
-initFirebase();
 
-// ── EXPOSE FUNCTIONS TO WINDOW (required for module scripts) ─────────────────
+// Wait for everything to load then init Firebase
+window.addEventListener("load", initFirebaseIfReady);
+
+// Expose all functions globally
 window.showPage=showPage;
 window.toggleForm=toggleForm;
 window.openForm=openForm;
@@ -981,6 +1084,9 @@ window.renderContacts=renderContacts;
 window.calcSplit=calcSplit;
 window.updateGoals=updateGoals;
 window.clearAllData=clearAllData;
+
+// Render immediately with sample data so UI is never blank
+renderAll();
 </script>
 </body>
 </html>
