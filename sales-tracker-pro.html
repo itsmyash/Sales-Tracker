@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta http-equiv="Content-Security-Policy" content="default-src *; style-src * 'unsafe-inline'; script-src * 'unsafe-inline' 'unsafe-eval'; img-src * data: blob:;">
 <title>SalesTracker Pro ⭐</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
@@ -169,8 +170,8 @@ input[type=range]{width:100%;accent-color:#f59e0b;cursor:pointer;}
   #print-area{display:block!important;}
 }
 </style>
-<script src="https://unpkg.com/firebase@10.8.0/compat/app.js"></script>
-<script src="https://unpkg.com/firebase@10.8.0/compat/firestore.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.8.0/compat/app.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.8.0/compat/firestore.min.js"></script>
 </head>
 <body>
 
