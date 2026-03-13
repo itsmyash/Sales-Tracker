@@ -962,6 +962,25 @@ function exportCSV(){
   document.getElementById(id)?.addEventListener("change", saveData);
 });
 initFirebase();
+
+// ── EXPOSE FUNCTIONS TO WINDOW (required for module scripts) ─────────────────
+window.showPage=showPage;
+window.toggleForm=toggleForm;
+window.openForm=openForm;
+window.saveDeal=saveDeal;
+window.editDeal=editDeal;
+window.deleteDeal=deleteDeal;
+window.changeStatus=changeStatus;
+window.updatePreview=updatePreview;
+window.toggleTask=toggleTask;
+window.addTask=addTask;
+window.exportCSV=exportCSV;
+window.printReport=printReport;
+window.renderReport=renderReport;
+window.renderContacts=renderContacts;
+window.calcSplit=calcSplit;
+window.updateGoals=updateGoals;
+window.clearAllData=clearAllData;
 </script>
 </body>
 </html>
